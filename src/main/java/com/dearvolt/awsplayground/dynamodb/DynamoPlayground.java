@@ -44,7 +44,6 @@ enum AttributeNames {
 
 public class DynamoPlayground {
     private final String termsAndConditionsTableName = "TermsAndConditionsSubmissions";
-    private DynamoDB dynamoDB = new DynamoDB(AmazonDynamoDBClientBuilder.defaultClient());
     private AmazonDynamoDB dbClient = AmazonDynamoDBClientBuilder.standard().withEndpointConfiguration(
             new AwsClientBuilder.EndpointConfiguration("http://localhost:8000", "eu-west-1")
     ).build();
@@ -55,25 +54,55 @@ public class DynamoPlayground {
         DynamoPlayground playground = new DynamoPlayground();
         try {
             playground.createTestTable();
+            playground.createTestItems();
         } catch (ResourceInUseException e) {
             System.err.println("Table already exists. Moving on...\n");
         }
-        playground.createTestItems();
         playground.describeTable();
         playground.getAllItems();
+
+        playground.getSingleItem("14", "2019-09-23T14:07:53.325");
+
+        System.out.println("\nTesting query...");
+        System.out.println("TRUE == " + playground.hasUserAcceptedTermsAndConditions("1", 69));
+        System.out.println("FALSE == " + playground.hasUserAcceptedTermsAndConditions("14", 69));
+        System.out.println("FALSE == " + playground.hasUserAcceptedTermsAndConditions("8", 68));
+    }
+
+    private Map<String, AttributeValue> getSingleItem(String digitalId, String timestamp) {
+        Map<String, AttributeValue> query = new HashMap<>();
+        query.put(AttributeNames.DIGITAL_ID.getAttributeName(), new AttributeValue().withS(digitalId));
+        query.put(AttributeNames.TIMESTAMP.getAttributeName(), new AttributeValue().withS(timestamp));
+        GetItemRequest request = new GetItemRequest()
+                .withTableName(termsAndConditionsTableName)
+                .withKey(query);
+        GetItemResult response = dbClient.getItem(request);
+        return response.getItem();
     }
 
     private boolean hasUserAcceptedTermsAndConditions(String digitalId, int version) {
-        QuerySpec spec = new QuerySpec()
-                .withHashKey("DigitalID", digitalId)
-                .withQueryFilters(
-                        new QueryFilter("Submission").eq("ACCEPT"),
-                        new QueryFilter("Version").eq(version)
-                );
-        Table termsAndConditionsTable = dynamoDB.getTable(termsAndConditionsTableName);
-        ItemCollection<QueryOutcome> items = termsAndConditionsTable.query(spec);
+        // Set up an alias for the partition key name in case it's a reserved word
+        HashMap<String, String> attrNameAlias = new HashMap<>();
+        attrNameAlias.put("#digitalid", AttributeNames.DIGITAL_ID.getAttributeName());
+        attrNameAlias.put("#submission", AttributeNames.SUBMISSION.getAttributeName());
+        attrNameAlias.put("#version", AttributeNames.VERSION.getAttributeName());
 
-        return items.getAccumulatedItemCount() > 0;
+        // Set up mapping of the partition name with the value
+        HashMap<String, AttributeValue> attrValues = new HashMap<>();
+        attrValues.put(":" + AttributeNames.DIGITAL_ID.getAttributeName(), new AttributeValue().withS(digitalId));
+        attrValues.put(":" + AttributeNames.SUBMISSION.getAttributeName(), new AttributeValue().withS("ACCEPT"));
+        attrValues.put(":" + AttributeNames.VERSION.getAttributeName(), new AttributeValue().withN(String.valueOf(version)));
+
+        QueryRequest request = new QueryRequest()
+                .withTableName(termsAndConditionsTableName)
+                .withKeyConditionExpression("#digitalid = :DigitalID")
+                .withFilterExpression("#submission = :Submission AND #version = :Version")
+                .withExpressionAttributeNames(attrNameAlias)
+                .withExpressionAttributeValues(attrValues);
+
+        QueryResult result = dbClient.query(request);
+
+        return result.getCount() > 0;
     }
 
     private void createTestTable() {
