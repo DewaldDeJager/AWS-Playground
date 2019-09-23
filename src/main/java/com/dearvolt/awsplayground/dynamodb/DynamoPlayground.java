@@ -7,9 +7,15 @@ import com.amazonaws.services.dynamodbv2.document.*;
 import com.amazonaws.services.dynamodbv2.document.spec.QuerySpec;
 import com.amazonaws.services.dynamodbv2.model.*;
 
+import java.time.LocalDateTime;
+import java.util.*;
+
 enum AttributeNames {
     DIGITAL_ID("DigitalID"),
-    TIMESTAMP("Timestamp");
+    TIMESTAMP("Timestamp"),
+    SUBMISSION("Submission"),
+    VERSION("Version", ScalarAttributeType.N),
+    CHANNEL("Channel");
 
     private String name;
     private ScalarAttributeType type;
@@ -42,6 +48,7 @@ public class DynamoPlayground {
     private AmazonDynamoDB dbClient = AmazonDynamoDBClientBuilder.standard().withEndpointConfiguration(
             new AwsClientBuilder.EndpointConfiguration("http://localhost:8000", "eu-west-1")
     ).build();
+    private Random random = new Random(1337);
 
     public static void main(String[] args) {
         System.out.println("xD");
@@ -85,7 +92,39 @@ public class DynamoPlayground {
     }
 
     private void createTestItems() {
-        // TODO
+        System.out.println("\nCREATING TEST ITEMS\n");
+        List<WriteRequest> itemWriteRequests = new ArrayList<>();
+        for (int i = 1; i < 26; i++) {
+            itemWriteRequests.add(new WriteRequest(createRandomItemRequest(String.valueOf(i))));
+        }
+
+        Map<String, List<WriteRequest>> tableWriteRequest = new HashMap<>();
+        tableWriteRequest.put(termsAndConditionsTableName, itemWriteRequests);
+
+        BatchWriteItemRequest request = new BatchWriteItemRequest(tableWriteRequest);
+        dbClient.batchWriteItem(request);
+        System.out.println("\nDONE CREATING TEST ITEMS\n");
+    }
+
+    private PutRequest createRandomItemRequest(String digitalId) {
+        // TODO: Add random data
+        Map<String, AttributeValue> randomItem = new HashMap<>();
+        randomItem.put(AttributeNames.DIGITAL_ID.getAttributeName(), new AttributeValue().withS(digitalId));
+        randomItem.put(AttributeNames.TIMESTAMP.getAttributeName(), new AttributeValue().withS(LocalDateTime.now().toString()));
+        randomItem.put(AttributeNames.SUBMISSION.getAttributeName(), new AttributeValue().withS(random.nextFloat() < 0.05 ? "REJECT" : "ACCEPT"));
+        randomItem.put(AttributeNames.VERSION.getAttributeName(), new AttributeValue().withN("69"));
+        randomItem.put(AttributeNames.CHANNEL.getAttributeName(), new AttributeValue().withS("DERP"));
+
+        return new PutRequest().withItem(randomItem);
+    }
+
+    private void addItem(Submission submission) {
+        System.out.println("\nADDING NEW ITEM\n");
+        PutItemRequest request = new PutItemRequest()
+                .withTableName(termsAndConditionsTableName)
+                .withItem(submission.toItem());
+        dbClient.putItem(request);
+        System.out.println("\nDONE ADDING NEW ITEM\n");
     }
 
     // aws dynamodb describe-table --table-name TermsAndConditionsSubmissions --endpoint-url http://localhost:8000
@@ -93,6 +132,10 @@ public class DynamoPlayground {
         System.out.println("\nDESCRIBING TABLE\n");
         System.out.println(dbClient.describeTable(termsAndConditionsTableName));
         System.out.println("\nDONE DESCRIBING TABLE\n");
+    }
+
+    private void deleteTable() {
+        dbClient.deleteTable(termsAndConditionsTableName);
     }
 
     // aws dynamodb scan --table-name TermsAndConditionsSubmissions --endpoint-url http://localhost:8000
